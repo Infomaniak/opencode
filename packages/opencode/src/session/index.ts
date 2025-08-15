@@ -47,6 +47,56 @@ import { Wildcard } from "../util/wildcard"
 import { ulid } from "ulid"
 import { defer } from "../util/defer"
 
+/**
+ * Converts string parameters to their appropriate types based on the schema
+ * This fixes an issue where MCP tools receive all parameters as strings
+ */
+function convertMCPArgs(args: Record<string, any>, schema: any): Record<string, any> {
+  if (!schema || !args) return args
+
+  const converted: Record<string, any> = {}
+
+  for (const [key, value] of Object.entries(args)) {
+    // If the value is not a string, keep it as is
+    if (typeof value !== "string") {
+      converted[key] = value
+      continue
+    }
+
+    // Try to parse as JSON first (for arrays, objects, booleans, numbers)
+    try {
+      converted[key] = JSON.parse(value)
+      continue
+    } catch {
+      // If JSON parsing fails, continue with type inference
+    }
+
+    // Try to convert to number if it looks like a number
+    if (/^-?\d+(\.\d+)?$/.test(value)) {
+      const num = parseFloat(value)
+      if (!isNaN(num)) {
+        converted[key] = num
+        continue
+      }
+    }
+
+    // Try to convert to boolean
+    if (value.toLowerCase() === "true") {
+      converted[key] = true
+      continue
+    }
+    if (value.toLowerCase() === "false") {
+      converted[key] = false
+      continue
+    }
+
+    // Keep as string if no conversion applies
+    converted[key] = value
+  }
+
+  return converted
+}
+
 export namespace Session {
   const log = Log.create({ service: "session" })
 
@@ -845,7 +895,10 @@ export namespace Session {
       const execute = item.execute
       if (!execute) continue
       item.execute = async (args, opts) => {
-        const result = await execute(args, opts)
+        // Convert string parameters to appropriate types
+        const convertedArgs = convertMCPArgs(args, item.inputSchema)
+
+        const result = await execute(convertedArgs, opts)
         const output = result.content
           .filter((x: any) => x.type === "text")
           .map((x: any) => x.text)
